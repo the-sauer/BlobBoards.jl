@@ -1,5 +1,4 @@
 #=
-import VisualGeometryToolkitIO as VgtkIO
 make_pipeline_panels.jl — Fig. `fig:pipeline` of the BMVC paper: the four
 stages of the detection-to-pose pipeline on ONE detected board.
 
@@ -7,6 +6,7 @@ stages of the detection-to-pose pipeline on ONE detected board.
 # reproduce: writes papers/images/bb_pipe_adapt.pdf
 # reproduce: writes papers/images/bb_pipe_logpolar.pdf
 # reproduce: writes papers/images/bb_pipe_register.pdf
+# reproduce: writes papers/images/bb_pipe_match.pdf
 
 The frame, board and crop are those of the submitted panels (identified
 2026-10-08 by registering board 6b0 in the submitted panel rasters and in
@@ -21,6 +21,9 @@ overlays are today's detector, adaptation and registration.
   (d) register  the board's reference pattern projected under the recovered
                 pose (yellow), reference blob centres in green at opacity equal
                 to their posterior inlier weight
+  (e) match     the board's csponds (the set its pose was fitted on) as lines
+                from the reference board (left) to the photo (right): MAP
+                inliers green, rejected csponds red
 
 Everything runs through `BlobBoards.trace_pipeline` — detect -> adapt ->
 filter once, and registration with `find_boards` under ONE `FindBoardsConfig`,
@@ -63,7 +66,8 @@ using DrWatson
 using DrWatson: projectdir
 using BlobBoards
 using BlobBoards: trace_pipeline, PoseGeometry, DetectConfig, EllipseNms, descriptor_network_path, load_bundle, cutoff, blobs, is_map_inlier,
-    canonicalize, DEFAULT_OUTER_EXTENT
+    canonicalize, DEFAULT_OUTER_EXTENT, load_board, dpi
+using CoordinateTransformations: AffineMap
 using CairoMakie; CairoMakie.activate!()
 using CUDA
 import cuDNN
@@ -78,11 +82,8 @@ using Statistics: mean
 using CoordinateTransformations: PerspectiveMap
 using VisualGeometryToolkitCore: VisualGeometryToolkitCore, imshow, ellipses!, HomographyMap, feature_frame,
     centroid, ustrip, targets, sources, EllipticFrame, CameraModel, Pinhole
-import VisualGeometryToolkitIO
-using VisualGeometryToolkitEval.Experiments: Stage, run_stages
-
+import VisualGeometryToolkitIo as VgtkIo
 if !isdefined(Main, :BlobBoardsEval)
-    include(joinpath(@__DIR__, "..", "src", "BlobBoardsEval.jl"))
 end
 using Main.BlobBoardsEval: data_root, paper_images_dir, figure_config, write_figure_records, camera_of_record, gallery_path
 const BlobBoardsEval = Main.BlobBoardsEval
@@ -212,21 +213,21 @@ function main()
     adapted = [feature_frame(f) for f in Array(arm.filtered)]
 
     # The highlighted inliers, in the DISPLAYED (undistorted) frame. The
-    # registration's targets are in the raw image (find_boards measures on the
-    # raw pixels and verifies through the full camera), so each MAP inlier's
-    # reference blob is projected through the pinhole pose and paired with the
-    # nearest adapted frame; the `n_highlight` largest are shown.
+    # registration adapts its own frames (find_boards, per polarity group), so
+    # each MAP inlier's reference blob is projected through the pinhole pose
+    # and paired with the nearest frame of the trace's adaptation; the
+    # `n_highlight` largest are shown.
     w = scored.weights
     inl = [i for i in eachindex(w) if is_map_inlier(w[i])]
     ref = [Hw * SVector(ustrip.(centroid(feature_frame(sources(scored)[i])))..., 1.0) for i in inl]
     ref = [SVector(r[1] / r[3], r[2] / r[3]) for r in ref]
     actr = [SVector{2, Float64}(ustrip.(centroid(f))...) for f in adapted]
-    pairs = Tuple{Int, Float64}[]
+    matched = Int[]
     for r in ref
         d, j = findmin(a -> norm(a - r), actr)
-        d <= RND["highlight_match_px"] && push!(pairs, (j, w[inl[1]]))
+        d <= RND["highlight_match_px"] && push!(matched, j)
     end
-    cand = unique(first.(pairs))
+    cand = unique(matched)
     sort!(cand; by = j -> -area(adapted[j]))
     sel = adapted[cand[1:min(N_HIGHLIGHT, end)]]
     pal = Makie.to_colormap(Symbol(RND["palette"]))
@@ -276,6 +277,40 @@ function main()
     pin!(ax, lims)
     push!(files, joinpath(out, CFG["output"]["names"][4])); Makie.save(files[end], fig; pt_per_unit = RND["pt_per_unit"])
 
+    # (e) match — the board's csponds as lines from its reference raster (left)
+    # to the photo (right). The run config undistorts globally (`undistortion =
+    # "global"`), so the targets are already in the displayed frame.
+    board_path = only(bp for bp in board_paths if load_board(bp).uid == uid)
+    lb = load_board(board_path)
+    nr = length(rows)
+    # the raster's height is `board_oversample` x the crop's, scaled down to it
+    ppi = round(Int, RND["board_oversample"] * nr / wd[2] * 25.4)   # wd: the board's world extent, mm
+    braster = BlobBoards.rasterize_pdf(lb.image_path, ppi)
+    s = nr / size(braster, 1)
+    bw = size(braster, 2) * s
+    gap = RND["match_gap"]
+    xb0 = 0.5 - gap - bw                     # board image's left edge, crop pixels
+    to_px = AffineMap(bundle, :world, :pixel; image_origin = :julia, density = ppi * dpi)
+    # a raster pixel's edge (0.5) lands on the board image's edge
+    bpt(f) = (p = to_px(SVector{2, Float64}(ustrip.(centroid(feature_frame(f)))...)); Point2f(xb0 + s * (p[1] - 0.5), 0.5 + s * (p[2] - 0.5)))
+    ipt(f) = (c = ustrip.(centroid(feature_frame(f))); Point2f(c[1] - dx, c[2] - dy))
+    seg = [(bpt(a), ipt(b), is_map_inlier(x)) for (a, b, x) in zip(sources(scored), targets(scored), w)]
+    lims = (xb0, size(crop, 2) + 0.5, 0.5, nr + 0.5)
+    pad = RND["figure_padding"]
+    fh = PANEL_SIZE[2]
+    fw = round(Int, (lims[2] - lims[1]) / (lims[4] - lims[3]) * (fh - 2pad) + 2pad)
+    fig = Figure(size = (fw, fh), figure_padding = pad)
+    ax = Axis(fig[1, 1]; aspect = DataAspect(), yreversed = true)
+    hidedecorations!(ax); hidespines!(ax)
+    image!(ax, xb0 .. (xb0 + bw), 0.5 .. (nr + 0.5), transpose(Gray.(braster)); interpolate = false)
+    image!(ax, 0.5 .. (size(crop, 2) + 0.5), 0.5 .. (nr + 0.5), transpose(crop); interpolate = false)
+    for (inlier, color) in ((false, RGBA(1, 0.15, 0.1, RND["match_alpha"])), (true, RGBA(0, 1, 0.3, RND["match_alpha"])))
+        linesegments!(ax, [p => q for (p, q, i) in seg if i == inlier]; color, linewidth = RND["match_width"])
+    end
+    pin!(ax, lims)
+    push!(files, joinpath(out, CFG["output"]["names"][5])); Makie.save(files[end], fig; pt_per_unit = RND["pt_per_unit"])
+    @info "match panel" n_csponds = length(seg) n_inliers = count(last, seg) size = (fw, fh)
+
     write_figure_records(CFG, CFG_PATH; driver = "bmvc2026/scripts/make_pipeline_panels.jl",
         inputs = [IMAGE, CAMERA_JSON, GALLERY, BOARDS_DIR, CONFIG_PATH], outputs = files)
     @info "pipeline panels" image = basename(IMAGE) uid n_detections = length(dets) n_adapted = length(adapted) n_inliers = length(inl) crop = (rows, cols) files
@@ -284,4 +319,4 @@ function main()
 end
 
 const RESULT = Ref{Any}(nothing)
-run_stages("make_pipeline_panels", [Stage(:render, "the four pipeline panels (GPU)", () -> false, () -> (RESULT[] = main(); nothing))])
+run_stages("make_pipeline_panels", [Stage(:render, "the five pipeline panels (GPU)", () -> false, () -> (RESULT[] = main(); nothing))])
