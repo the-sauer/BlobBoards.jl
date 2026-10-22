@@ -10,7 +10,8 @@
 \multicolumn{3}{c}{(a) Translation error} \\[6pt]
 \input{figures/floorplan/hist_rot_small} & \input{figures/floorplan/hist_rot_medium} & \input{figures/floorplan/hist_rot_large} \\
 \multicolumn{3}{c}{(b) Rotation error} \\
-\end{tabular}\\[4pt]
+\\%[4pt]
+\multicolumn{3}{c}{
 \begin{tikzpicture}[baseline]
 \draw[bbBlue, line width=1.2pt] (0.0cm,0) -- (0.6cm,0);
 \node[anchor=west, font=\small] at (0.7cm,0) {BlobBoards};
@@ -19,3 +20,5 @@
 \draw[bbGreen, line width=1.2pt] (6.0cm,0) -- (6.6cm,0);
 \node[anchor=west, font=\small] at (6.7cm,0) {ArUco};
 \end{tikzpicture}
+}
+\end{tabular}
