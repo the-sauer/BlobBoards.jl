@@ -83,6 +83,8 @@ using CoordinateTransformations: PerspectiveMap
 using VisualGeometryToolkitCore: VisualGeometryToolkitCore, imshow, ellipses!, HomographyMap, feature_frame,
     centroid, ustrip, targets, sources, EllipticFrame, CameraModel, Pinhole
 import VisualGeometryToolkitIo as VgtkIo
+using VisualGeometryToolkitEval.Experiments: Stage, run_stages
+
 if !isdefined(Main, :BlobBoardsEval)
 end
 using Main.BlobBoardsEval: data_root, paper_images_dir, figure_config, write_figure_records, camera_of_record, gallery_path
@@ -94,14 +96,6 @@ const CONFIG_PATH = projectdir("configs", INP["run_config"])
 const RUN = read_run_config(CONFIG_PATH)
 # Two sources: "data_root" — a still anywhere under data_root() (the
 # descriptor-training stills live there) — or "dataset", a frame of
-# <dataset>/images/bb. The descriptor network is the run config of record's.
-const SOURCE = INP["source"]
-if SOURCE == "data_root"
-    # a still anywhere under data_root(): image, camera and boards are
-    # data_root()-relative (the descriptor-training stills live here)
-    const ROOT = data_root(; tiers = String.(CFG["experiment"]["tiers"]))
-    const IMAGE = joinpath(ROOT, INP["image"])
-    const CAMERA_JSON = joinpath(ROOT, INP["camera"])
     const BOARDS_DIR = joinpath(ROOT, INP["boards_dir"])
     const NETWORK = joinpath(ROOT, RUN.descriptor["model"])
     const GALLERY = isempty(INP["gallery"]) ? joinpath(tempdir(), "blobboards_pipeline_gallery.jld2") : INP["gallery"]
