@@ -40,3 +40,15 @@ original = "original"                    # + the photo's extension
 name = "adapted_{uid}.png"
 # The boards the figure shows, in column order (colours are assigned over all detections).
 uids = ["fde", "f80", "336", "14b"]
+
+[jpeg]
+# ADDITIONAL output (the poster includes it; the paper does not): the same
+# panel as a JPEG at the source photo's resolution and compression. It is drawn
+# from its own render of the figure, so the paper's PNGs above are unchanged.
+name = "adapted_{uid}.jpg"
+photo_px = 1920                          # the source's own width: no downsampling
+px_per_unit = 1.2                        # 1600 units -> 1920x2560, the source photo's size (checked against it)
+# JPEG settings of the source photo (original.jpg: baseline, 4:2:0, JFIF 72 dpi —
+# libjpeg's defaults besides quality and density), so the panels match it.
+quality = 90
+dpi = 72

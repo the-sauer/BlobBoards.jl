@@ -33,7 +33,7 @@ only what changed. A failing step is FATAL.
   16. make_param_variations.jl      blob_variations_squared/*.png (fig:params)
  --gpu (the descriptor network and the board gallery):
   17. make_bmvc2026_intro.jl        intro_overlay.png
-  18. make_adapted_panels.jl        adapted/{original.jpg, adapted_*.png}
+  18. make_adapted_panels.jl        adapted/{original.jpg, adapted_*.png} (+ adapted_*.jpg for the poster)
   19. make_pipeline_panels.jl       bb_pipe_{detect,adapt,logpolar,register}.pdf
 
 Outputs go to papers/figures and papers/images unless BB_PAPER_FIGURES /
@@ -158,7 +158,7 @@ stages = [
 ]
 gpu_stages = [
     _stage(:intro, "intro_overlay.png (GPU)", "make_bmvc2026_intro.jl"),
-    _stage(:adapted_panels, "adapted/{original.jpg, adapted_*.png} (GPU)", "make_adapted_panels.jl"),
+    _stage(:adapted_panels, "adapted/{original.jpg, adapted_*.png, adapted_*.jpg} (GPU)", "make_adapted_panels.jl"),
     _stage(:pipeline_panels, "bb_pipe_{detect,adapt,logpolar,register}.pdf (GPU)", "make_pipeline_panels.jl"),
 ]
 
