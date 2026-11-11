@@ -150,7 +150,7 @@
 
     \textbf{Fiducial marker system}
     \begin{itemize}[nosep]
-        \item instrinsically multiscale
+        \item intrinsically multiscale
         \item coverage density for accuracy
         \item robustness against occlusion
     \end{itemize}
@@ -229,31 +229,36 @@
 \end{itemize}
 }
 
+% one panel is \pipepanel wide (3:4); panels sit \pipegap = 0.047 panels apart
+% in both rows, so (d) -- two panels and the gap between them -- is exactly
+% 2.047 panels wide, at a panel's height, and its edges line up with (a)/(b)
+\newlength{\pipepanel}
+\newlength{\pipegap}
 \block{Pipeline}{
-	% \centering
-	\begin{minipage}{0.31\linewidth}
+	\centering
+	\setlength{\pipepanel}{0.32\linewidth}%
+	\setlength{\pipegap}{0.047\pipepanel}%
+	\begin{minipage}{\pipepanel}
 		\centering
 		{\small (a) detect}\\[2pt]
 		\includegraphics[width=\linewidth]{images/bb_pipe_detect.pdf}
-	\end{minipage}\hfill
-	\begin{minipage}{0.31\linewidth}
+	\end{minipage}\hspace{\pipegap}%
+	\begin{minipage}{\pipepanel}
 		\centering
 		{\small (b) adapt}\\[2pt]
 		\includegraphics[width=\linewidth]{images/bb_pipe_adapt.pdf}
-	\end{minipage}\hfill
-	\begin{minipage}{0.31\linewidth}
+	\end{minipage}\hspace{\pipegap}%
+	\begin{minipage}{\pipepanel}
 		\centering
 		{\small (c) canonicalize}\\[2pt]
 		\includegraphics[width=\linewidth]{images/bb_pipe_logpolar.pdf}
 	\end{minipage}\\[5pt]
-
-	\begin{minipage}{0.655\linewidth}	% 2x panel width (0.31) + 1x margin width (0.035)
+	\begin{minipage}{2.047\pipepanel}
 		\centering
 		{\small (d) match}\\[2pt]
-		\includegraphics[width=\linewidth]{images/bb_pipe_match.pdf}
-	\end{minipage}
-	\hfill
-	\begin{minipage}{0.31\linewidth}
+		\includegraphics[width=\linewidth, height=\dimexpr 4\pipepanel/3\relax]{images/bb_pipe_match.pdf}
+	\end{minipage}\hspace{\pipegap}%
+	\begin{minipage}{\pipepanel}
 		\centering
 		{\small (e) estimate pose}\\[2pt]
 		\includegraphics[width=\linewidth]{images/bb_pipe_register.pdf}

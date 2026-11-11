@@ -82,10 +82,11 @@ using Statistics: mean
 using CoordinateTransformations: PerspectiveMap
 using VisualGeometryToolkitCore: VisualGeometryToolkitCore, imshow, ellipses!, HomographyMap, feature_frame,
     centroid, ustrip, targets, sources, EllipticFrame, CameraModel, Pinhole
-import VisualGeometryToolkitIo as VgtkIo
+import VisualGeometryToolkitIO as VgtkIO
 using VisualGeometryToolkitEval.Experiments: Stage, run_stages
 
 if !isdefined(Main, :BlobBoardsEval)
+    include(joinpath(@__DIR__, "..", "src", "BlobBoardsEval.jl"))
 end
 using Main.BlobBoardsEval: data_root, paper_images_dir, figure_config, write_figure_records, camera_of_record, gallery_path
 const BlobBoardsEval = Main.BlobBoardsEval
@@ -96,6 +97,14 @@ const CONFIG_PATH = projectdir("configs", INP["run_config"])
 const RUN = read_run_config(CONFIG_PATH)
 # Two sources: "data_root" — a still anywhere under data_root() (the
 # descriptor-training stills live there) — or "dataset", a frame of
+# <dataset>/images/bb. The descriptor network is the run config of record's.
+const SOURCE = INP["source"]
+if SOURCE == "data_root"
+    # a still anywhere under data_root(): image, camera and boards are
+    # data_root()-relative (the descriptor-training stills live here)
+    const ROOT = data_root(; tiers = String.(CFG["experiment"]["tiers"]))
+    const IMAGE = joinpath(ROOT, INP["image"])
+    const CAMERA_JSON = joinpath(ROOT, INP["camera"])
     const BOARDS_DIR = joinpath(ROOT, INP["boards_dir"])
     const NETWORK = joinpath(ROOT, RUN.descriptor["model"])
     const GALLERY = isempty(INP["gallery"]) ? joinpath(tempdir(), "blobboards_pipeline_gallery.jld2") : INP["gallery"]
@@ -248,7 +257,12 @@ function main()
     adapt_img = Gray{Float32}.(reinterpret(Gray{BlobBoards.N0f8}, detect_img))
     patches = canonicalize(sel, adapt_img; mode = :logpolar, patch_size = PATCH,
         inner_extent = cut, outer_extent = DEFAULT_OUTER_EXTENT, device = BlobBoards.KA.CPU())
-    fig = Figure(size = PANEL_SIZE, figure_padding = RND["logpolar_padding"])
+    # 4 x 3 square patches 4 pt apart: the side margin sets their size, the
+    # vertical margin is what the squares leave (else the rows spread apart)
+    lp = RND["logpolar_padding"]
+    side = (PANEL_SIZE[1] - 2lp - 2 * 4) / 3
+    lpv = (PANEL_SIZE[2] - (4side + 3 * 4)) / 2
+    fig = Figure(size = PANEL_SIZE, figure_padding = (lp, lp, lpv, lpv))
     for (k, p) in enumerate(patches)
         r, c = fldmod1(k, 3)
         a = Axis(fig[r, c]; aspect = DataAspect(), spinewidth = 6, leftspinecolor = pal[k],
@@ -280,23 +294,37 @@ function main()
     # the raster's height is `board_oversample` x the crop's, scaled down to it
     ppi = round(Int, RND["board_oversample"] * nr / wd[2] * 25.4)   # wd: the board's world extent, mm
     braster = BlobBoards.rasterize_pdf(lb.image_path, ppi)
-    s = nr / size(braster, 1)
-    bw = size(braster, 2) * s
-    gap = RND["match_gap"]
-    xb0 = 0.5 - gap - bw                     # board image's left edge, crop pixels
-    to_px = AffineMap(bundle, :world, :pixel; image_origin = :julia, density = ppi * dpi)
-    # a raster pixel's edge (0.5) lands on the board image's edge
-    bpt(f) = (p = to_px(SVector{2, Float64}(ustrip.(centroid(feature_frame(f)))...)); Point2f(xb0 + s * (p[1] - 0.5), 0.5 + s * (p[2] - 0.5)))
-    ipt(f) = (c = ustrip.(centroid(feature_frame(f))); Point2f(c[1] - dx, c[2] - dy))
-    seg = [(bpt(a), ipt(b), is_map_inlier(x)) for (a, b, x) in zip(sources(scored), targets(scored), w)]
-    lims = (xb0, size(crop, 2) + 0.5, 0.5, nr + 0.5)
+    # The panel is `match_span` panels wide at a panel's height (Makie rounds a
+    # figure size to whole units; the poster sets the exact box). The photo is
+    # drawn at the SAME scale and in the same place relative to the panel's
+    # right edge as in a single panel (`panel_axis`: fitted into the padded
+    # panel, centred), so it lines up with the panel above it; the board fills
+    # the width left of it and the gap, centred vertically.
     pad = RND["figure_padding"]
     fh = PANEL_SIZE[2]
-    fw = round(Int, (lims[2] - lims[1]) / (lims[4] - lims[3]) * (fh - 2pad) + 2pad)
+    fw = round(Int, RND["match_span"] * PANEL_SIZE[1])
+    nc = size(crop, 2)
+    k = min((PANEL_SIZE[1] - 2pad) / nc, (fh - 2pad) / nr)    # pt per crop pixel in a single panel
+    xr = nc + 0.5 + ((PANEL_SIZE[1] - 2pad) / k - nc) / 2     # the panel's inner right edge, crop pixels
+    xl = xr - (fw - 2pad) / k
+    yc, yh = (nr + 1) / 2, (fh - 2pad) / 2k
+    gap = RND["match_gap"]
+    bw = (0.5 - gap) - xl                    # board image width, crop pixels
+    s = bw / size(braster, 2)
+    bh = size(braster, 1) * s
+    0 < bh <= nr || error("match panel: the board ($(round(bw; digits = 1)) x $(round(bh; digits = 1)) crop px) does not fit beside the photo; adjust match_span / match_gap")
+    xb0 = xl                                 # board image's left edge, crop pixels
+    yb0 = 0.5 + (nr - bh) / 2                # its top edge
+    to_px = AffineMap(bundle, :world, :pixel; image_origin = :julia, density = ppi * dpi)
+    # a raster pixel's edge (0.5) lands on the board image's edge
+    bpt(f) = (p = to_px(SVector{2, Float64}(ustrip.(centroid(feature_frame(f)))...)); Point2f(xb0 + s * (p[1] - 0.5), yb0 + s * (p[2] - 0.5)))
+    ipt(f) = (c = ustrip.(centroid(feature_frame(f))); Point2f(c[1] - dx, c[2] - dy))
+    seg = [(bpt(a), ipt(b), is_map_inlier(x)) for (a, b, x) in zip(sources(scored), targets(scored), w)]
+    lims = (xl, xr, yc - yh, yc + yh)
     fig = Figure(size = (fw, fh), figure_padding = pad)
     ax = Axis(fig[1, 1]; aspect = DataAspect(), yreversed = true)
     hidedecorations!(ax); hidespines!(ax)
-    image!(ax, xb0 .. (xb0 + bw), 0.5 .. (nr + 0.5), transpose(Gray.(braster)); interpolate = false)
+    image!(ax, xb0 .. (xb0 + bw), yb0 .. (yb0 + bh), transpose(Gray.(braster)); interpolate = false)
     image!(ax, 0.5 .. (size(crop, 2) + 0.5), 0.5 .. (nr + 0.5), transpose(crop); interpolate = false)
     for (inlier, color) in ((false, RGBA(1, 0.15, 0.1, RND["match_alpha"])), (true, RGBA(0, 1, 0.3, RND["match_alpha"])))
         linesegments!(ax, [p => q for (p, q, i) in seg if i == inlier]; color, linewidth = RND["match_width"])

@@ -26,7 +26,7 @@ gallery = ""                             # "" = a tempdir() cache; a CACHE (rebu
 panel_size = [450, 600]                  # Makie units
 pt_per_unit = 1.0                        # -> a 450 x 600 pt PDF page (CairoMakie defaults to 0.75)
 figure_padding = 12                      # white margin around the photo panels (measured on the submitted PDFs: 12 pt each side)
-logpolar_padding = 8                     # margin of the 4 x 3 log-polar patch grid
+logpolar_padding = 15                    # margin of the 4 x 3 log-polar patch grid: its 6-pt spines (centred on the axes) end at 12 pt, the photo panels' edge
 crop_pad = 0.30                          # outline bbox grown by this per side, then to 3:4 (when `crop` is empty)
 # [row0, col0, rows, cols] of the undistorted image; [] = the padded window.
 # Recovered 2026-10-08 by registering board 6b0 in the submitted adapt panel
@@ -38,8 +38,9 @@ n_highlight = 12                         # the largest inliers highlighted (adap
 highlight_match_px = 3.0                 # an inlier's projected reference blob pairs with the adapted frame within this (px)
 patch = 64
 palette = "Paired_12"
-# (e) match: the reference board left of the crop, at the crop's height
-board_oversample = 2                     # the board raster's height / the crop's (it is drawn scaled to the crop)
+# (e) match: the reference board left of the crop, scaled to fill the width the span leaves
+match_span = 2.047                       # the match panel's width / a panel's (two panels + the gap between them on the poster)
+board_oversample = 2                     # the board raster's height / the crop's (it is drawn scaled down to fit)
 match_gap = 40                           # crop pixels between the board and the photo
 match_width = 0.75                       # line width (Makie units)
 match_alpha = 0.7
