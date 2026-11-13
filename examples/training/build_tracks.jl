@@ -51,6 +51,7 @@ Example:
       --patch-type cartesian --scale 16 --n-frames 30 --output-dir /data/out
 =#
 
+using Pkg.Artifacts
 using BlobBoards
 using BlobBoards: build_tracks_for_sequences   # advanced API (unexported)
 
@@ -87,11 +88,17 @@ function parse_args(argv)
 end
 
 pos, opts, flags = parse_args(ARGS)
-if length(pos) != 3
+if length(pos) == 0
+    println("using default video, model and boards artifacts")
+    video_dir = artifact"bb_descriptor_training_sources"
+    board_dir = artifact"bb_boards_descriptor_training_wood_board5"
+    model_path = joinpath(artifact"track_logpolar_circ_s96_iter4", "track_logpolar_circ_s96_iter4.onnx")
+elseif length(pos) != 3
     println("usage: build_tracks.jl VIDEO_DIR BOARD_DIR MODEL.onnx [options]  (see file header)")
     exit(1)
+else
+    video_dir, board_dir, model_path = pos
 end
-video_dir, board_dir, model_path = pos
 
 # --- Backend: CUDA by default, CPU with --cpu --------------------------------
 backend = if "--cpu" in flags
@@ -123,7 +130,7 @@ uncap = "--uncap" in flags
 
 kw = (;
     patch_type      = Symbol(get(opts, "--patch-type", "logpolar")),
-    scale           = optreal("--scale", 32.0),
+    scale           = optreal("--scale", 96.0),
     iou_threshold   = optreal("--iou-threshold", 0.6),
     min_inliers     = something(optint("--min-inliers"), 20),
     confuser_factor = uncap ? Inf : optnum("--confuser-factor", 1.0),

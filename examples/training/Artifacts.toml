@@ -1,0 +1,23 @@
+[bb_descriptor_training_sources]
+git-tree-sha1 = "cd4eea8afcf66b642100462aa10d81418aca2c2f"
+lazy = true
+
+    [[bb_descriptor_training_sources.download]]
+    sha256 = "1e5608977b147cb48177394ce717b080b403e6362de9f61142828b0323a3384b"
+    url = "https://zenodo.org/records/23937759/files/bb_descriptor_training_sources.tar.gz?download=1"
+
+[track_logpolar_circ_s96_iter4]
+git-tree-sha1 = "4018efc39186b1f7c287771d69da99817d73afd5"
+lazy = true
+
+    [[track_logpolar_circ_s96_iter4.download]]
+    sha256 = "f92e3566ea747941f7efbd96ca0d5b322fdb74d2fcf5fdf7c8d582282aeaac67"
+    url = "https://zenodo.org/records/23243553/files/track_logpolar_circ_s96_iter4.tar.gz?download=1"
+
+[bb_boards_descriptor_training_wood_board5]
+git-tree-sha1 = "e0f9dd0ae71a737ecc0faf8df5b191f5071560d4"
+lazy = true
+
+    [[bb_boards_descriptor_training_wood_board5.download]]
+    sha256 = "f556b6f1a7f96c893e5727b655f403b5e2bf5d3007c3a1eacc8d54d6633c5e03"
+    url = "https://zenodo.org/records/23921651/files/bb_boards_descriptor_training_wood_board5.tar.gz?download=1"

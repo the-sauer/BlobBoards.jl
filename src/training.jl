@@ -301,6 +301,12 @@ function _write_untracked!(sg, untracked::AbstractVector, untracked_frame_ids)
     P = size(first(untracked), 1)
     ug = HDF5.create_group(sg, "untracked")
     _stack_patches!(ug, "patches", untracked, P)
+    if hasproperty(untracked, :coords)
+        ug["coords"] = Array{Float32}(undef, 2, length(untracked.coords))
+        for i in 1:length(untracked.coords)
+            ug["coords"][:, i] = untracked.coords[i]
+        end
+    end
     isnothing(untracked_frame_ids) || (ug["frame_id"] = Int32.(untracked_frame_ids))
     return
 end
@@ -314,6 +320,12 @@ function _write_untracked!(sg, untracked::NamedTuple, _)
     ug = HDF5.create_group(sg, "untracked")
     _stack_patches!(ug, "patches", untracked.patch, P)
     _stack_patches!(ug, "masks", untracked.mask, P)
+    if hasproperty(untracked, :coords)
+    ug["coords"] = Array{Float32}(undef, 2, length(untracked.coords))
+        for i in 1:length(untracked.coords)
+            ug["coords"][:, i] = untracked.coords[i]
+        end
+    end
     return
 end
 
@@ -354,6 +366,7 @@ function _save_track_dict(
     all_patches = Array{Float32}(undef, P, P, n_total)
     all_masks = Array{Float32}(undef, P, P, n_total)
     all_affine = Array{Float32}(undef, 2, 2, n_total)
+    all_coords = Array{Float32}(undef, 2, n_total)
     all_track_ids = Vector{Int32}(undef, n_total)
     all_frame_ids = has_frame ? Vector{Int32}(undef, n_total) : nothing
 
@@ -366,6 +379,7 @@ function _save_track_dict(
             all_patches[:, :, idx] .= Float32.(track["patch"][k])
             all_masks[:, :, idx] .= Float32.(track["mask"][k])
             all_affine[:, :, idx] .= Float32.(track["affine_shape"][k])
+            all_coords[:, idx] .= Float32.(track["coords"][k])
             has_frame && (all_frame_ids[idx] = Int32(track["frame_id"][k]))
         end
     end
@@ -383,6 +397,7 @@ function _save_track_dict(
         g["track_id"] = all_track_ids
         g["n_tracks"] = Int32(n_tracks)
         g["track_lengths"] = track_lengths
+        g["coords"] = all_coords
         has_frame && (g["frame_id"] = all_frame_ids)   # (N,) per-observation source frame
         # Per-frame detection geometry: one homography + viewing angle per detected
         # frame, joined to observations via `frame_id` → `homography_frame_ids`.
@@ -1670,6 +1685,7 @@ function save_board_anchors(
             "patch" => Any[patches[i]],
             "mask" => Any[masks[i]],
             "affine_shape" => Any[SMatrix{2, 2, Float64}(1.0I)],
+            "coords" => Any[centroid(board.canvas_frames[i]) ./ img_size]
         )
     end
     sink(board.uid, anchors, nothing, true)
@@ -1841,6 +1857,8 @@ function build_absolute_tracks(
     println("  ($(basename(video_path))) read $(length(frames_all)) frame(s)")
     isempty(frames_all) && return output_path
 
+    img_size = size(frames_all[1])
+
     # Detect + track every board across the sampled frames. Capping detections
     # keeps the GPU descriptor-match GEMM (all boards × all detections) in memory
     # on high-resolution footage.
@@ -1902,7 +1920,7 @@ function build_absolute_tracks(
         tracks = Dict{Int32, Dict{String, Vector}}()
         for i in 1:N
             tracks[Int32(i)] = Dict{String, Vector}(
-                "patch" => Any[], "mask" => Any[], "affine_shape" => Any[],
+                "patch" => Any[], "mask" => Any[], "affine_shape" => Any[], "coords" => Any[],
                 # Source frame index of each observation — the join key into the
                 # sequence's per-frame homography / view-angle table (`frame_geom`
                 # below), so the board's world→image geometry is stored once per
@@ -1945,7 +1963,7 @@ function build_absolute_tracks(
             # Confuser (untracked) patches: each unmatched detection
             # contributes one patch + its in-frame mask. Capped per
             # board at save.
-            ut_patch = Matrix{Float32}[], ut_mask = Matrix{Float32}[]
+            ut_patch = Matrix{Float32}[], ut_mask = Matrix{Float32}[], ut_coords = Any[]
         )
     end
 
@@ -2011,7 +2029,7 @@ function build_absolute_tracks(
                     inner_extent = st.board_cutoff, H_aug = H_aug_or_nothing
                 )
             end
-            H_wi = H_aug * SMatrix{3, 3, Float64}(to_homogeneous(det.H))  # world → warped image
+            H_wi = H_aug * SMatrix{3, 3, Float64}(to_homogeneous(det.model))  # world → warped image
             H_wi_inv = inv(H_wi)                                  # warped image → world
             # Viewing obliquity of this board in this (possibly warped) frame,
             # evaluated at the board centroid. One record per frame — every
@@ -2058,12 +2076,25 @@ function build_absolute_tracks(
                     )
                 )
                 push!(t["affine_shape"], extracted.affine_shapes[p.idx_j])
+                push!(t["coords"], centroid(extracted.frames[p.idx_j]) ./ img_size)
                 push!(t["frame_id"], frame_idx)
                 push!(tracked, p.idx_j)
             end
-            for j in eachindex(extracted.patches)
-                j in tracked && continue
+            # Cap THIS frame's confusers at `confuser_factor ×` its tracked
+            # patches, sampled at random, before buffering them. Buffering every
+            # unmatched detection of every frame and capping only at save held
+            # (frames × detections × boards) patch+mask pairs (32 KB each at
+            # P = 64) for the whole media item — tens of GB on long clips.
+            # The save-time cap below still bounds the sequence total.
+            untracked_js = [j for j in eachindex(extracted.patches) if j ∉ tracked]
+            n_ut = isfinite(confuser_factor) ?
+                min(length(untracked_js), round(Int, confuser_factor * length(csponds))) :
+                length(untracked_js)
+            n_ut < length(untracked_js) &&
+                (untracked_js = untracked_js[randperm(length(untracked_js))[1:n_ut]])
+            for j in untracked_js
                 push!(st.ut_patch, extracted.patches[j])
+                push!(st.ut_coords, centroid(extracted.frames[j]) ./ img_size)
                 push!(st.ut_mask, Float32.(extracted.inframe[j]))  # confuser: in-frame only
             end
             println(
@@ -2119,12 +2150,12 @@ function build_absolute_tracks(
         # A non-finite `confuser_factor` (e.g. `Inf`) disables the cap — keep all.
         n_tracked = sum(length(t["patch"]) for t in values(filtered))
         cap = isfinite(confuser_factor) ? round(Int, confuser_factor * n_tracked) : typemax(Int)
-        ut_patch, ut_mask = st.ut_patch, st.ut_mask
+        ut_patch, ut_mask, ut_coords = st.ut_patch, st.ut_mask, st.ut_coords
         if length(ut_patch) > cap
             keep = randperm(length(ut_patch))[1:cap]
-            ut_patch = ut_patch[keep]; ut_mask = ut_mask[keep]
+            ut_patch = ut_patch[keep]; ut_mask = ut_mask[keep]; ut_coords = ut_coords[keep]
         end
-        confusers = (; patch = ut_patch, mask = ut_mask)
+        confusers = (; patch = ut_patch, mask = ut_mask, coords = ut_coords)
 
         # Per-frame detection geometry table for this sequence: one homography +
         # viewing angle per frame the board was detected in, ordered by frame
